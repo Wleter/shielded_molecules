@@ -1,0 +1,15 @@
+[workspace]
+members = ["shielded_mol_py"]
+resolver = "3"
+
+[package]
+name = "shielded_molecules"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+faer = "0.22.6"
+rayon = "1"
+indicatif = { version = "0.18", features = ["rayon"]}
+# scattering-problems = {git = "https://github.com/Wleter/quantum-rs", branch = "master"}
+scattering-problems = {path = "../quantum-rs/scattering-problems"}
