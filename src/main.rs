@@ -25,7 +25,7 @@ impl Problems {
         let params = default_params();
         let problem = get_problem(&params);
 
-        let distances = linspace(2., 100., 101);
+        let distances = linspace(0.5, 6., 1001);
 
         let values = distances
             .iter()
@@ -44,9 +44,9 @@ impl Problems {
         let params = default_params();
         let problem = get_problem(&params);
         let step_rule = LocalWavelengthStepRule::new(1e-4, 10., 500.);
-        let r_range = (2., 10., 500.);
-        let e_range = (0., 1.);
-        let e_err = 1e-3;
+        let r_range = (0.8, 2., 6.);
+        let e_range = (0., 5.);
+        let e_err = 1e-4;
 
         let bound_states = BoundProblemBuilder::new(&problem.particles, &problem.potential)
                 .with_propagation(step_rule.clone(), Johnson)
@@ -63,16 +63,16 @@ impl Problems {
 
 pub fn default_params() -> SystemParams {
     SystemParams {
-        l_max: 0,
+        l_max: 2,
         parity: ParityBlock::Positive,
 
-        c6: 1e3,
-        c3: 1e3,
-        ksi: 1.,
+        c6: 9.25010281855974,
+        c3: 13.543607688069887,
+        ksi: 0.,
 
-        trap_freq: 1e-3,
+        trap_freq: 1.,
 
         mass: 1.,
-        energy: 1.,
+        energy: 0.,
     }
 }

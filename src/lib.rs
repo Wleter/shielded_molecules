@@ -68,8 +68,8 @@ pub fn get_problem(params: &SystemParams) -> SystemProblem {
             let m = cast_variant!(x[0], Basis::Angular).ms;
 
             match params.parity {
-                ParityBlock::Positive => m.double_value() % 4 == 0,
-                ParityBlock::Negative => m.double_value() % 4 == 2,
+                ParityBlock::Positive => m.double_value().abs() % 4 == 0,
+                ParityBlock::Negative => m.double_value().abs() % 4 == 2,
                 ParityBlock::All => true,
             }
         })
