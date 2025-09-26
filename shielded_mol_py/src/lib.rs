@@ -6,7 +6,7 @@ use pyo3::prelude::*;
         scattering_solver::{
             log_derivatives::johnson::Johnson,
             numerovs::LocalWavelengthStepRule,
-            observables::bound_states::{BoundProblemBuilder, BoundStates},
+            observables::bound_states::{BoundProblemBuilder, BoundStates, Monotony},
             quantum::{cast_variant, units::{Au, Energy}},
         },
     },
@@ -83,6 +83,7 @@ struct Problem {
     problem: sm::SystemProblem,
     r_range: (f64, f64, f64),
     step_rule: LocalWavelengthStepRule,
+    node_range: Option<[u64; 2]>
 }
 
 #[pymethods]
@@ -111,6 +112,7 @@ impl Problem {
             problem: sm::get_problem(&params),
             r_range: (r_min, r_match, r_max),
             step_rule: LocalWavelengthStepRule::default(),
+            node_range: None
         }
     }
 
@@ -125,15 +127,23 @@ impl Problem {
     }
 
     fn step_rule(&mut self, dr_min: f64, dr_max: f64, wavelength_ratio: f64) {
-        self.step_rule = LocalWavelengthStepRule::new(dr_min, dr_max, wavelength_ratio);
+        self.step_rule = LocalWavelengthStepRule::new(dr_min, dr_max, wavelength_ratio)
+    }
+
+    fn node_range(&mut self, node_min: u64, node_max: u64) {
+        self.node_range = Some([node_min, node_max])
     }
 
     pub fn bound_states(&self, e_range: (f64, f64), e_err: f64) -> Vec<BoundState> {
-        let bound_states =
-            BoundProblemBuilder::new(&self.problem.particles, &self.problem.potential)
-                .with_propagation(self.step_rule.clone(), Johnson)
-                .with_range(self.r_range.0, self.r_range.1, self.r_range.2)
-                .build();
+        let mut bound_states_builder = BoundProblemBuilder::new(&self.problem.particles, &self.problem.potential)
+            .with_propagation(self.step_rule.clone(), Johnson)
+            .with_range(self.r_range.0, self.r_range.1, self.r_range.2)
+            .with_monotony(Monotony::Increasing);
+
+        if let Some(node_range) = self.node_range {
+            bound_states_builder = bound_states_builder.with_nodes_range(node_range);
+        }
+        let bound_states = bound_states_builder.build();
 
         let e_range = (Energy(e_range.0, Au), Energy(e_range.1, Au));
 
