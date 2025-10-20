@@ -1,15 +1,7 @@
 use pyo3::prelude::*;
-    use shielded_molecules::{
+use shielded_molecules::{
     self as sm,
-    scattering_problems::{
-        alkali_rotor_atom::ParityBlock,
-        scattering_solver::{
-            log_derivatives::johnson::Johnson,
-            numerovs::LocalWavelengthStepRule,
-            observables::bound_states::{BoundProblemBuilder, BoundStates, Monotony},
-            quantum::{cast_variant, units::{Au, Energy}},
-        },
-    },
+    cc_problems::{self, hilbert_space::Parity, prelude::*}
 };
 
 #[pyclass]
@@ -17,13 +9,19 @@ struct SystemParams {
     #[pyo3(get, set)]
     l_max: u32,
     #[pyo3(get, set)]
-    parity: String,
+    m_parity: String,
+    #[pyo3(get, set)]
+    symmetry: String,
+    #[pyo3(get, set)]
+    entrance: (u32, i32),
+
     #[pyo3(get, set)]
     c6: f64,
     #[pyo3(get, set)]
     c3: f64,
     #[pyo3(get, set)]
     ksi: f64,
+
     #[pyo3(get, set)]
     trap_freq: f64,
     #[pyo3(get, set)]
@@ -37,7 +35,9 @@ impl SystemParams {
     #[new]
     fn new(
         l_max: u32,
-        parity: String,
+        m_parity: String,
+        symmetry: String,
+        entrance: (u32, i32),
         c6: f64,
         c3: f64,
         ksi: f64,
@@ -47,7 +47,9 @@ impl SystemParams {
     ) -> Self {
         Self {
             l_max,
-            parity,
+            m_parity,
+            symmetry,
+            entrance,
             c6,
             c3,
             ksi,
@@ -74,32 +76,58 @@ impl BoundState {
     }
 
     fn __repr__(&self) -> PyResult<String> {
-        Ok(format!("<BoundState energy={} nodes={}>", self.energy, self.nodes))
+        Ok(format!(
+            "<BoundState energy={} nodes={}>",
+            self.energy, self.nodes
+        ))
     }
+}
+
+#[pyclass]
+struct SMatrix {
+    #[pyo3(get)]
+    elastic_cross_sect: f64,
+
+    #[pyo3(get)]
+    scattering_length_re: f64,
+
+    #[pyo3(get)]
+    scattering_length_im: f64,
+
+    #[pyo3(get)]
+    inelastic_cross_sections: Vec<f64>,
 }
 
 #[pyclass]
 struct Problem {
     problem: sm::SystemProblem,
     r_range: (f64, f64, f64),
-    step_rule: LocalWavelengthStepRule,
-    node_range: Option<[u64; 2]>
+    step_rule: LocalWavelengthStep,
+    node_range: Option<[u64; 2]>,
 }
 
 #[pymethods]
 impl Problem {
     #[new]
     fn new(params: &SystemParams, r_min: f64, r_match: f64, r_max: f64) -> Self {
-        let parity = match params.parity.as_str() {
-            "all" => ParityBlock::All,
-            "even" => ParityBlock::Positive,
-            "odd" => ParityBlock::Negative,
+        let parity = match params.m_parity.as_str() {
+            "all" => Parity::All,
+            "even" => Parity::Even,
+            "odd" => Parity::Odd,
             _ => panic!("Only all/even/odd values are allowed"),
+        };
+        let symmetry = match params.symmetry.as_str() {
+            "none" => Parity::All,
+            "fermionic" => Parity::Odd,
+            "bosonic" => Parity::Even,
+            _ => panic!("Only none/fermionic/bosonic values are allowed"),
         };
 
         let params = sm::SystemParams {
             l_max: params.l_max,
             parity,
+            symmetry,
+            entrance: params.entrance,
             c6: params.c6,
             c3: params.c3,
             ksi: params.ksi,
@@ -111,23 +139,17 @@ impl Problem {
         Problem {
             problem: sm::get_problem(&params),
             r_range: (r_min, r_match, r_max),
-            step_rule: LocalWavelengthStepRule::default(),
-            node_range: None
+            step_rule: LocalWavelengthStep::default(),
+            node_range: None,
         }
     }
 
     pub fn channels(&self) -> Vec<(u32, i32)> {
-        self.problem.basis.iter()
-            .map(|x| {
-                let l = cast_variant!(x[0], sm::Basis::Angular);
-
-                (l.s.double_value() / 2, l.ms.double_value() / 2)
-            })
-            .collect()
+        self.problem.channels.clone()
     }
 
     fn step_rule(&mut self, dr_min: f64, dr_max: f64, wavelength_ratio: f64) {
-        self.step_rule = LocalWavelengthStepRule::new(dr_min, dr_max, wavelength_ratio)
+        self.step_rule = LocalWavelengthStep::new(dr_min, dr_max, wavelength_ratio)
     }
 
     fn node_range(&mut self, node_min: u64, node_max: u64) {
@@ -135,46 +157,71 @@ impl Problem {
     }
 
     pub fn bound_states(&self, e_range: (f64, f64), e_err: f64) -> Vec<BoundState> {
-        let mut bound_states_builder = BoundProblemBuilder::new(&self.problem.particles, &self.problem.potential)
-            .with_propagation(self.step_rule.clone(), Johnson)
-            .with_range(self.r_range.0, self.r_range.1, self.r_range.2)
-            .with_monotony(Monotony::Increasing);
+        let problem = &self.problem.red_coupling;
+
+        let mut bound_finder = BoundStatesFinder::default()
+            .set_problem(|e| {
+                let mut problem = problem.clone();
+                problem.asymptote.set_energy(e * AuEnergy);
+
+                problem
+            })
+            .set_parameter_range(e_range.into(), e_err)
+            .set_propagator(|b, w| JohnsonLogDerivative::new(w, self.step_rule.into(), b))
+            .set_r_range([self.r_range.0 * Bohr, self.r_range.1 * Bohr, self.r_range.2 * Bohr]);
 
         if let Some(node_range) = self.node_range {
-            bound_states_builder = bound_states_builder.with_nodes_range(node_range);
+            bound_finder = bound_finder.set_node_range(NodeRangeTarget::Range(node_range[0], node_range[1]));
         }
-        let bound_states = bound_states_builder.build();
 
-        let e_range = (Energy(e_range.0, Au), Energy(e_range.1, Au));
-
-        let bound_states = bound_states.bound_states(e_range, Energy(e_err, Au));
+        let bound_states = bound_finder.bound_states();
 
         bound_states
-            .energies
-            .iter()
-            .zip(&bound_states.nodes)
-            .map(|(e, n)| BoundState {
-                energy: *e,
-                nodes: *n,
-            })
+            .map(|b| {
+                let b = b.unwrap();
+
+                BoundState {
+                    energy: b.parameter,
+                    nodes: b.node,
+                }
+            })  
             .collect()
     }
 
-    pub fn wave_function(&self, bound_state: &BoundState) -> (Vec<f64>, Vec<Vec<f64>>) {
-        let bound_states =
-            BoundProblemBuilder::new(&self.problem.particles, &self.problem.potential)
-                .with_propagation(self.step_rule.clone(), Johnson)
-                .with_range(self.r_range.0, self.r_range.1, self.r_range.2)
-                .build();
+    pub fn scattering(&self, r_min: f64, r_max: f64) -> SMatrix {
+        let boundary = vanishing_boundary(r_min * Bohr, Direction::Outwards, &self.problem.red_coupling);
 
-        let wave_function = bound_states
-            .bound_waves(&BoundStates {
-                energies: vec![bound_state.energy],
-                nodes: vec![bound_state.nodes],
-                occupations: None,
+        let mut propagator = RatioNumerov::new(&self.problem.red_coupling, self.step_rule.into(), boundary);
+        let solution = propagator.propagate_to(r_max);
+
+        let s_matrix = solution.get_s_matrix(&self.problem.red_coupling);
+
+        SMatrix {
+            elastic_cross_sect: s_matrix.get_elastic_cross_sect(),
+            scattering_length_re: s_matrix.get_scattering_length().re,
+            scattering_length_im: s_matrix.get_scattering_length().im,
+            inelastic_cross_sections: s_matrix.get_inelastic_cross_sects(),
+        }
+    }
+
+    pub fn wave_function(&self, bound_state: &BoundState) -> (Vec<f64>, Vec<Vec<f64>>) {
+        let problem = &self.problem.red_coupling;
+        let bound_finder = BoundStatesFinder::default()
+            .set_problem(|e| {
+                let mut problem = problem.clone();
+                problem.asymptote.set_energy(e * AuEnergy);
+
+                problem
             })
-            .next()
-            .unwrap();
+            .set_propagator(|b, w| JohnsonLogDerivative::new(w, self.step_rule.into(), b))
+            .set_r_range([self.r_range.0 * Bohr, self.r_range.1 * Bohr, self.r_range.2 * Bohr]);
+
+        let wave_function = bound_finder
+            .bound_wave(&cc_problems::bound_states::BoundState { 
+                parameter: bound_state.energy, 
+                node: bound_state.nodes, 
+                occupations: None
+            });
 
         (wave_function.distances, wave_function.values)
     }
@@ -184,6 +231,7 @@ impl Problem {
 fn shielded_mol_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SystemParams>()?;
     m.add_class::<BoundState>()?;
+    m.add_class::<SMatrix>()?;
     m.add_class::<Problem>()?;
 
     Ok(())
