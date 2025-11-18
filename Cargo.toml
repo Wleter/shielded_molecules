@@ -1,11 +1,14 @@
-[workspace]
-members = ["shielded_mol_py"]
-resolver = "3"
 
 [package]
 name = "shielded_molecules"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "shielded_molecules"
+crate-type = ["cdylib"]
+
 [dependencies]
+pyo3 = {version = "0.26.0", features = ["auto-initialize", "experimental-inspect"]}
 cc_problems = { git = "https://github.com/Wleter/coupled_chan_rs" }
+faer-ext = {version = "0.7.1", features = ["numpy", "ndarray"]}

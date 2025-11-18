@@ -1,26 +1,19 @@
 
+class NumpyPotential:
+    def __init__(self, size: int, potential) -> None: ...
+
 class SystemParams:
-    l_max: int
-    parity: str
-    symmetry: str
-    entrance: tuple[int, int]
-    c6: float
-    c3: float
-    ksi: float
-    trap_freq: float
+    levels: list[tuple[int, int]]
+    entrance: int
+    potential: NumpyPotential
     mass: float
     energy: float
 
     def __init__(
         self, 
-        l_max: int,
-        parity: str,
-        symmetry: str,
-        entrance: tuple[int, int],
-        c6: float,
-        c3: float,
-        ksi: float,
-        trap_freq: float,
+        levels: list[tuple[int, int]],
+        entrance: int,
+        potential: NumpyPotential,
         mass: float,
         energy: float,
     ) -> None: ...

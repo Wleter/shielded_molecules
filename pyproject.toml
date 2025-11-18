@@ -3,7 +3,7 @@ requires = ["maturin>=1.9,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "shielded_mol_py"
+name = "shielded_molecules"
 requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Rust",
